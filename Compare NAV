@@ -1,0 +1,76 @@
+import os
+import pandas as pd
+
+def load_excel_files(folder_path):
+    """Load and merge all Excel files from a given folder."""
+    all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.endswith('.xlsx')]
+    
+    if not all_files:
+        print("No Excel files found in the folder.")
+        return pd.DataFrame()
+    
+    df_list = []
+    for file in all_files:
+        try:
+            df = pd.read_excel(file, dtype=str)  # Read as string to prevent type mismatches
+            df_list.append(df)
+        except Exception as e:
+            print(f"Error reading {file}: {e}")
+
+    return pd.concat(df_list, ignore_index=True) if df_list else pd.DataFrame()
+
+def compare_nav_values(folder1, file2, output_folder, identifier, nav_column):
+    """Compare NAV values, calculate difference, and save output files."""
+    # Load data
+    df1 = load_excel_files(folder1)
+    if df1.empty:
+        print("No valid data in folder1.")
+        return
+    
+    try:
+        df2 = pd.read_excel(file2, dtype=str)
+    except Exception as e:
+        print(f"Error reading {file2}: {e}")
+        return
+    
+    # Convert NAV column to numeric
+    for df, label in [(df1, "file1"), (df2, "file2")]:
+        if identifier not in df.columns or nav_column not in df.columns:
+            print(f"Missing columns in {label}. Ensure {identifier} and {nav_column} exist.")
+            return
+        df[nav_column] = pd.to_numeric(df[nav_column], errors='coerce')
+
+    # Merge on identifier
+    merged_df = df1.merge(df2, on=identifier, suffixes=('_file1', '_file2'))
+    
+    # Drop rows with NaN in NAV columns
+    merged_df = merged_df.dropna(subset=[f'{nav_column}_file1', f'{nav_column}_file2'])
+    
+    # Calculate NAV difference
+    merged_df['NAV_Difference'] = merged_df[f'{nav_column}_file1'] - merged_df[f'{nav_column}_file2']
+    
+    # Remove rows where difference is zero
+    filtered_df = merged_df[merged_df['NAV_Difference'] != 0]
+
+    if filtered_df.empty:
+        print("No differences found.")
+        return
+
+    # Ensure output folder exists
+    os.makedirs(output_folder, exist_ok=True)
+
+    # Split if rows exceed 700,000
+    chunk_size = 700000
+    for i, start_idx in enumerate(range(0, len(filtered_df), chunk_size), start=1):
+        output_file = os.path.join(output_folder, f'output_{i}.xlsx')
+        filtered_df.iloc[start_idx:start_idx + chunk_size].to_excel(output_file, index=False)
+        print(f'Saved: {output_file}')
+
+# Example Usage
+folder1 = "path/to/multiple/excel/files"
+file2 = "path/to/single/excel/file.xlsx"
+output_folder = "path/to/output/folder"
+identifier = "Fund Name"  # Change to the actual identifier column
+nav_column = "NAV"  # Change to the actual NAV column name
+
+compare_nav_values(folder1, file2, output_folder, identifier, nav_column)
